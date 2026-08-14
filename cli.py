@@ -1,9 +1,3 @@
-"""cli.py — Optional CLI utility commands (run, sample, eval, chat).
-
-Note: The primary entry point for normal conversational use is `python main.py`.
-This module provides supplementary utilities.
-"""
-
 from __future__ import annotations
 
 import argparse

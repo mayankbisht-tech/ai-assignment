@@ -12,8 +12,6 @@ You only need to run:
 python main.py
 ```
 
-No command-line arguments or flags are required.
-
 ---
 
 ## Conversational Interaction Example
@@ -110,12 +108,6 @@ travel-planner/
 
 ---
 
-## Running Tests & Evaluation
-
-Run unit test suite:
-```bash
-python -m unittest discover tests
-```
 
 Run evaluation harness:
 ```bash

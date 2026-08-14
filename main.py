@@ -1,14 +1,3 @@
-"""main.py — Interactive Conversational CLI for the Grounded Travel Planner.
-
-Usage:
-    python main.py
-
-The user interacts naturally across multiple turns. State (destination, days, party,
-budget, preferences) is preserved between turns. When all required information is
-collected, a 100% catalog-grounded itinerary and quote are printed to the console
-and saved to outputs/CHAT.json.
-"""
-
 from __future__ import annotations
 
 import sys
