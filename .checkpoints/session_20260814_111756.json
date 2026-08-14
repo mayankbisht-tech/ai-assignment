@@ -1,0 +1,258 @@
+{
+  "catalog": [
+    {
+      "id": "HOT-001",
+      "type": "hotel",
+      "name": "Backwater Breeze Homestay",
+      "location": "Alleppey",
+      "price_per_night": 3200,
+      "rating": 4.4,
+      "tags": [
+        "budget",
+        "family-friendly",
+        "backwaters",
+        "local-food",
+        "nature"
+      ],
+      "capacity": 4,
+      "description": "Family-run homestay on the Alleppey backwaters with home-cooked Kerala meals."
+    },
+    {
+      "id": "HOT-002",
+      "type": "hotel",
+      "name": "Tea County Resort",
+      "location": "Munnar",
+      "price_per_night": 6800,
+      "rating": 4.6,
+      "tags": [
+        "mid-range",
+        "nature",
+        "tea-estate",
+        "views",
+        "family-friendly"
+      ],
+      "capacity": 4,
+      "description": "Mid-range resort set among Munnar tea estates with mountain views."
+    },
+    {
+      "id": "HOT-003",
+      "type": "hotel",
+      "name": "Fort Kochi Heritage Inn",
+      "location": "Kochi",
+      "price_per_night": 4500,
+      "rating": 4.3,
+      "tags": [
+        "mid-range",
+        "heritage",
+        "city",
+        "local-food",
+        "couples"
+      ],
+      "capacity": 3,
+      "description": "Restored heritage inn in Fort Kochi near cafes and the waterfront."
+    },
+    {
+      "id": "HOT-004",
+      "type": "hotel",
+      "name": "Munnar Hikers Hostel",
+      "location": "Munnar",
+      "price_per_night": 1500,
+      "rating": 4.1,
+      "tags": [
+        "budget",
+        "hiking",
+        "backpacker",
+        "couples",
+        "nature"
+      ],
+      "capacity": 2,
+      "description": "No-frills budget stay popular with hikers, close to trailheads."
+    },
+    {
+      "id": "ACT-001",
+      "type": "activity",
+      "name": "Alleppey Houseboat Day Cruise",
+      "location": "Alleppey",
+      "price_per_person": 2200,
+      "duration_hours": 6,
+      "rating": 4.7,
+      "tags": [
+        "backwaters",
+        "nature",
+        "family-friendly",
+        "relaxed",
+        "food"
+      ],
+      "description": "Traditional houseboat cruise through the backwaters with lunch included."
+    },
+    {
+      "id": "ACT-002",
+      "type": "activity",
+      "name": "Munnar Tea Estate Walk & Tasting",
+      "location": "Munnar",
+      "price_per_person": 900,
+      "duration_hours": 3,
+      "rating": 4.5,
+      "tags": [
+        "tea-estate",
+        "nature",
+        "relaxed",
+        "family-friendly",
+        "couples"
+      ],
+      "description": "Guided walk through a working tea estate with a tasting session."
+    },
+    {
+      "id": "ACT-003",
+      "type": "activity",
+      "name": "Eravikulam National Park Trek",
+      "location": "Munnar",
+      "price_per_person": 1400,
+      "duration_hours": 5,
+      "rating": 4.6,
+      "tags": [
+        "hiking",
+        "nature",
+        "wildlife",
+        "adventure"
+      ],
+      "description": "Guided trek in Eravikulam National Park; moderate difficulty."
+    },
+    {
+      "id": "ACT-004",
+      "type": "activity",
+      "name": "Fort Kochi Food Walk",
+      "location": "Kochi",
+      "price_per_person": 1200,
+      "duration_hours": 3,
+      "rating": 4.8,
+      "tags": [
+        "local-food",
+        "city",
+        "culture",
+        "family-friendly",
+        "couples"
+      ],
+      "description": "Evening street-food and heritage walk through Fort Kochi."
+    },
+    {
+      "id": "ACT-005",
+      "type": "activity",
+      "name": "Kathakali Performance Evening",
+      "location": "Kochi",
+      "price_per_person": 500,
+      "duration_hours": 2,
+      "rating": 4.2,
+      "tags": [
+        "culture",
+        "city",
+        "family-friendly",
+        "relaxed"
+      ],
+      "description": "Classical Kathakali dance performance with makeup demonstration."
+    },
+    {
+      "id": "TRN-001",
+      "type": "transport",
+      "name": "Private Cab (Sedan, per day)",
+      "location": "Kerala",
+      "price_per_day": 3000,
+      "capacity": 4,
+      "tags": [
+        "private",
+        "flexible",
+        "family-friendly"
+      ],
+      "description": "Air-conditioned sedan with driver, per-day hire across Kerala."
+    },
+    {
+      "id": "TRN-002",
+      "type": "transport",
+      "name": "Private Cab (SUV, per day)",
+      "location": "Kerala",
+      "price_per_day": 4200,
+      "capacity": 6,
+      "tags": [
+        "private",
+        "flexible",
+        "family-friendly",
+        "group"
+      ],
+      "description": "Air-conditioned SUV with driver, per-day hire; suits larger families."
+    },
+    {
+      "id": "TRN-003",
+      "type": "transport",
+      "name": "Kochi Airport Transfer",
+      "location": "Kochi",
+      "price_flat": 1800,
+      "capacity": 4,
+      "tags": [
+        "transfer",
+        "airport"
+      ],
+      "description": "One-way private airport transfer within the Kochi region."
+    }
+  ],
+  "profile": {
+    "traveler_id": "USR-4471",
+    "name": "Ramesh & family",
+    "home_city": "Bengaluru",
+    "preferences": [
+      "nature",
+      "local-food",
+      "relaxed",
+      "family-friendly"
+    ],
+    "party": {
+      "adults": 2,
+      "children": 2,
+      "child_ages": [
+        8,
+        11
+      ]
+    },
+    "typical_budget_level": "mid-range",
+    "past_trips": [
+      {
+        "trip_id": "TRP-2201",
+        "destination": "Coorg",
+        "highlights": [
+          "coffee estate stay",
+          "waterfall visit",
+          "slow pace"
+        ],
+        "feedback": "Loved the estate stay and unhurried schedule; kids got bored on the long drives."
+      },
+      {
+        "trip_id": "TRP-2380",
+        "destination": "Wayanad",
+        "highlights": [
+          "wildlife safari",
+          "homestay",
+          "local cuisine"
+        ],
+        "feedback": "Great food and homestay; wanted more nature walks and fewer packed days."
+      }
+    ]
+  },
+  "all_ids": "{'HOT-001', 'HOT-004', 'ACT-001', 'ACT-004', 'ACT-002', 'TRN-002', 'TRN-003', 'HOT-003', 'ACT-003', 'HOT-002', 'TRN-001', 'ACT-005'}",
+  "messages": [],
+  "request_id": "session_20260814_111756",
+  "destination": null,
+  "region": null,
+  "days": null,
+  "adults": null,
+  "children": null,
+  "budget": null,
+  "preferences": [],
+  "intent": "catalog_question",
+  "destination_known": false,
+  "matched_locations": [],
+  "candidates": {
+    "hotels": [],
+    "activities": [],
+    "transport": []
+  },
+  "learned_preferences": []
+}

@@ -1,0 +1,16 @@
+{
+  "request_id": "session_20260814_122135",
+  "destination": "Kochi",
+  "days_requested": null,
+  "adults": 0,
+  "children": 0,
+  "budget": null,
+  "preferences": [],
+  "intent": "unknown",
+  "response": "How many days for Kochi?",
+  "candidates": [],
+  "itinerary": {},
+  "validation_errors": [],
+  "attempts": 0,
+  "grounded_and_valid": false
+}

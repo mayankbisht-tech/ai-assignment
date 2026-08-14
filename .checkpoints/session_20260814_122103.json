@@ -1,0 +1,16 @@
+{
+  "request_id": "session_20260814_122103",
+  "destination": "Kochi",
+  "days_requested": 4,
+  "adults": 2,
+  "children": 0,
+  "budget": null,
+  "preferences": [],
+  "intent": "plan",
+  "response": "Perfect! Kochi, 4 days, 2 people. Let me plan that for you!",
+  "candidates": [],
+  "itinerary": {},
+  "validation_errors": [],
+  "attempts": 0,
+  "grounded_and_valid": false
+}

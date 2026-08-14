@@ -1,0 +1,16 @@
+{
+  "request_id": "session_20260814_121633",
+  "destination": null,
+  "days_requested": 4,
+  "adults": 2,
+  "children": 0,
+  "budget": null,
+  "preferences": [],
+  "intent": "plan",
+  "response": "Where would you like to go? Available: Alleppey, Kerala, Kochi, Munnar",
+  "candidates": [],
+  "itinerary": {},
+  "validation_errors": [],
+  "attempts": 0,
+  "grounded_and_valid": false
+}

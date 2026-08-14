@@ -1,0 +1,16 @@
+{
+  "request_id": "session_20260814_121926",
+  "destination": "uk",
+  "days_requested": null,
+  "adults": 0,
+  "children": 0,
+  "budget": null,
+  "preferences": [],
+  "intent": "plan",
+  "response": "How many days for uk?",
+  "candidates": [],
+  "itinerary": {},
+  "validation_errors": [],
+  "attempts": 0,
+  "grounded_and_valid": false
+}

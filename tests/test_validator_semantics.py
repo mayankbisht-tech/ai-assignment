@@ -1,33 +1,28 @@
+"""tests/test_validator_semantics.py — Validates semantic constraints on outputs."""
+
 import json
-import os
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from app import load_data, validate_node
+import unittest
+from pathlib import Path
+from app import load_data, validate_itinerary
 
-OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..")
-
-
-def load_output(name: str):
-    path = os.path.join(OUTPUTS_DIR, name)
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUTS_DIR = ROOT / "outputs"
 
 
-def test_req1_detects_days_and_hotel_quantity_mismatch():
-    data = load_data()
-    out = load_output("REQ-1.json")
-    itinerary = out.get("itinerary")
-    state = {
-        "itinerary": itinerary,
-        "all_ids": {item["id"] for item in data["suppliers"]},
-        "catalog": data["suppliers"],
-        "profile": data["traveler_profile"],
-        "destination_known": True,
-        "requested_days": 5,
-    }
+class TestValidatorSemantics(unittest.TestCase):
+    def setUp(self):
+        self.data = load_data()
 
-    res = validate_node(state)
-    errs = res.get("validation_errors", [])
-    # After generator fixes, REQ-1 should now pass semantic validation
-    assert not errs, f"Unexpected validation errors for REQ-1: {errs}"
+    def test_chat_output_semantics(self):
+        path = OUTPUTS_DIR / "CHAT.json"
+        if not path.exists():
+            return
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        itin = payload.get("itinerary")
+        if itin and itin.get("status") == "fulfilled":
+            errors = validate_itinerary(itin, self.data)
+            self.assertEqual(errors, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

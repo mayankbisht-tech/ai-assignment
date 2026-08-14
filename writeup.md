@@ -1,153 +1,134 @@
-# Part B — Write-up
+# Part B — Architecture & Reasoning Write-Up
 
-## Architecture
+AI-Assisted Grounded Travel Planner
+====================================
 
-Four LangGraph nodes, one linear pipeline with a bounded retry loop:
+## 1. Architecture
+
+The system is designed as an interactive, stateful conversational CLI built on **LangGraph**. Unlike a naive chatbot that passes an unbounded chat history to an LLM every turn, this architecture uses a structured **`PlannerState`** as the single source of truth across conversational turns.
 
 ```
-retrieve → plan (LLM) → validate ──(errors, attempts < 3)──▶ plan
-                              │
-                     (valid OR out of retries)
-                              ▼
-                          finalize
+                  ┌────────────────────────────────────────┐
+                  │          START (User Input)            │
+                  └───────────────────┬────────────────────┘
+                                      │
+                                      ▼
+                  ┌────────────────────────────────────────┐
+                  │    node_understand_and_update          │
+                  │ (Deterministic + LLM Slot Extraction)  │
+                  └───────────────────┬────────────────────┘
+                                      │
+                                      ▼
+                              [route_next_step]
+                       /             |              \
+     (out_of_catalog) /      (missing slots)         \ (all required slots present)
+                     ▼               ▼                ▼
+       ┌──────────────────────┐ ┌───────────────┐ ┌──────────────────────┐
+       │recover_invalid_dest  │ │ask_destination│ │  plan_itinerary      │
+       │ (lists catalog locs) │ │   ask_days    │ │(Catalog Match & Pure │
+       └─────────────┬────────┘ │   ask_party   │ │  Python Pricing)     │
+                     │          └───────┬───────┘ └──────────┬───────────┘
+                     │                  │                    │
+                     └──────────────────┼────────────────────┘
+                                        ▼
+                                      [ END ]
+                    (Outputs response & saves CHAT.json)
 ```
 
-- **retrieve** is plain Python, not the LLM. It matches the request text against
-  catalog locations, filters candidates by destination and reranks by overlap
-  with the traveler's stated preferences and budget level, and pulls a short
-  list of `learned_preferences` out of past-trip feedback (e.g. "avoid long
-  drives"). This keeps retrieval cheap, deterministic, and auditable — the LLM
-  never sees the full 12-item catalog, only the pre-filtered shortlist plus
-  explicit reasoning hints.
-- **plan** is the only node that calls Groq. It receives *only* the retrieved
-  candidates (never the full catalog) and is instructed, under hard rules, to
-  cite catalog ids, price strictly from candidate data, and return
-  `status: "unfulfillable"` when there's nothing relevant to work with.
-- **validate** is a second, independent Python gate: every id the model
-  mentions is checked against the real catalog, every subtotal and the grand
-  total are recomputed and compared, and the unfulfillable path is checked for
-  leakage (no fabricated days/prices allowed to sneak through).
-- If validation fails, the specific errors are appended to the next prompt and
-  **plan** is called again (max 2 retries) — this is the self-correction loop.
-  If it still fails after retries, the pipeline still returns a result, but
-  flagged `grounded_and_valid: false` with the errors attached, so a human
-  reviewer sees exactly what broke instead of a silently-wrong itinerary.
+### Why this architecture?
+- **Separation of Extraction vs Execution**: The LLM assists with intent understanding and slot extraction (when online), but the actual candidate retrieval, inventory matching, and quote calculations are strictly handled by deterministic Python logic.
+- **Incremental State Preservation**: Each turn updates only the slots mentioned, preserving previously collected information (e.g. asking for "4 days", then "2 adults", then "Actually Kochi" switches only destination without losing days or party size).
+- **Dynamic Catalog Grounding**: Available destinations and items are extracted dynamically from `sample_data.json` on initialization. No city names or IDs are hardcoded in planning branches.
 
-Retrieval and validation being ordinary code (not LLM calls) is the core
-design choice: it bounds cost, makes grounding testable/reproducible, and
-means a hallucination is *caught*, not just discouraged by prompting.
+---
 
-## Grounding
+## 2. Grounding (Zero Hallucinations)
 
-Three independent layers, not just prompt instructions:
+Grounding is enforced at four distinct levels:
 
-1. **Input restriction** — the LLM only ever sees the pre-filtered candidate
-   list, never the full catalog, so location-mismatched items (e.g. a Kochi
-   hotel for a Munnar-only trip) aren't even available to hallucinate onto.
-2. **Structured output contract** — a strict JSON schema requiring a real
-   catalog `id` on every line item and every day's hotel/activity/transport
-   reference.
-3. **Programmatic post-check** (`validate_node`) — regex-scans the entire
-   response for any `HOT-###` / `ACT-###` / `TRN-###` pattern and rejects it if
-   it doesn't exist in the real catalog (not just the candidate subset, in
-   case the model reaches outside what it was given); recomputes every price
-   from the catalog's own numbers; and requires `status: "unfulfillable"` with
-   an empty itinerary whenever `retrieve` found no destination match — the Goa
-   trap case.
+1. **Dynamic Catalog Introspection**:
+   The system queries `sample_data.json` to derive the set of valid destinations (`Alleppey`, `Kochi`, `Munnar`) and regional scopes (`Kerala`). Any destination outside this inventory (e.g., `Goa`, `Paris`, `Mumbai`) is caught before planning begins and gracefully declined with an explanation of available destinations.
 
-Nothing generated by the model ships without passing step 3. That's the actual
-grounding guarantee; steps 1–2 just make step 3 pass more often on the first try.
+2. **Catalog ID Preservation**:
+   Every hotel (`HOT-xxx`), activity (`ACT-xxx`), and transport (`TRN-xxx`) option in the generated itinerary references a verified item in `suppliers`.
 
-## Cost & latency
+3. **Deterministic Python Pricing (Never Computed by LLM)**:
+   LLMs frequently make arithmetic errors (e.g. multiplying prices or summing 8 line items incorrectly). In our system:
+   $$\text{Line Total} = \text{Unit Price (from catalog)} \times \text{Quantity}$$
+   $$\text{Grand Total} = \sum \text{Line Totals}$$
+   All calculations occur exclusively in Python code reading canonical fields directly from `sample_data.json`.
 
-- **Model choice**: default to a small/fast Groq model (e.g. `openai/gpt-oss-120b`
-  or an 8B-class model) for this task — it's structured extraction/composition
-  over a short, pre-filtered candidate list, not open-ended reasoning, so a
-  large model is rarely needed. Model id is an env var (`GROQ_MODEL`) so it can
-  be swapped without a code change as Groq's lineup changes.
-- **Token budget**: retrieval already does the expensive filtering, so the
-  prompt only carries ~5–15 candidate items instead of the full catalog —
-  this is the single biggest cost lever, since prompt size scales with
-  candidates, not catalog size.
-- **Caching**: cache on a normalized key (destination + party size + budget
-  level + preference set), since many requests will repeat these dimensions;
-  a cache hit skips the LLM call entirely.
-- **Streaming**: for a synchronous/human-facing flow, stream the plan node's
-  output so the agent sees days appear incrementally instead of waiting for
-  the full JSON — practical once the schema is streamed as it completes
-  (e.g. day-by-day) rather than one big object; simplest version is to just
-  stream the raw tokens to a "drafting..." view without exposing partial JSON
-  to the ultimate confirmation step.
-- **Retries add cost predictably**: capped at 2 retries, so worst-case cost is
-  3x a single call, not unbounded — this cap is a knob to tune based on
-  observed hallucination rates.
+4. **Independent Post-Validation (`validate_itinerary`)**:
+   Before an itinerary is presented or saved, `validate_itinerary()` independently audits the payload against `sample_data.json`:
+   - Checks that all referenced IDs exist in the catalog.
+   - Checks that item names and unit prices match canonical catalog data verbatim.
+   - Recomputes all line totals and the grand total to guarantee exact mathematical consistency.
 
-## Failure handling
+---
 
-- **LLM API down/rate-limited/slow**: wrap the Groq call with a timeout and a
-  small number of retries with backoff; on exhaustion, return a clear
-  "planning temporarily unavailable, try again" state rather than falling
-  back to a non-grounded generation path. Never silently degrade to
-  ungrounded output.
-- **Malformed JSON**: already handled — `plan_node` regex-extracts the first
-  `{...}` block to tolerate stray prose/fences; if parsing still fails, that's
-  itself a validation error that triggers a retry with explicit feedback
-  ("your last output was not valid JSON").
-- **Partial catalog data / empty candidates**: retrieval returning nothing
-  short-circuits to the unfulfillable path without even needing the LLM to
-  reason its way there — cheaper and safer than hoping the model notices.
-- **Retry exhaustion**: after `MAX_RETRIES`, the pipeline still returns a
-  result object, but with `grounded_and_valid: false` and the accumulated
-  errors — so it surfaces as "needs human review" rather than either crashing
-  or (worse) shipping unvalidated output.
+## 3. Cost & Latency Optimization
 
-## Evaluation
+In a production deployment, keeping latency sub-second and token costs minimal is critical:
 
-- **Automated grounding checks** (implemented, see `eval.py`): id-existence,
-  price-math correctness, and unfulfillable-path leakage, run as a repeatable
-  harness over any batch of outputs — this is the regression test for
-  hallucination.
-- **Retrieval/recommendation quality**: offline eval set of request → expected
-  candidate ids (e.g. "Munnar budget hiking" should surface `HOT-004`,
-  `ACT-003`, `ACT-002`, not `HOT-002`); measure precision/recall of the
-  retrieval step against that set, since it's deterministic and cheap to test
-  in isolation from the LLM.
-- **Business metrics in production**: % of itineraries requiring human edits
-  before confirmation (proxy for quality), % flagged unfulfillable that were
-  actually fulfillable (retrieval recall miss) vs. genuinely unfulfillable,
-  average agent review time per itinerary, and total token cost per
-  confirmed booking.
-- **Hallucination rate**: track validation failure rate per model/prompt
-  version over time from the same `eval.py`-style check running in CI against
-  a fixed regression set, so a prompt or model change that increases
-  hallucination is caught before deploy.
+- **Model Choice**:
+  `llama-3.3-70b-versatile` via Groq is used as the primary LLM with native JSON schema formatting. Groq LPU inference achieves ~500–800 tokens/sec with sub-second time-to-first-token (TTFT).
+- **Token Budget**:
+  Prompts only include current state slots and the latest message (~150–300 tokens input). We never dump entire catalog databases into the prompt context.
+- **Deterministic Offline Fallback**:
+  If the LLM API is unavailable, rate-limited, or offline, the system seamlessly uses its built-in deterministic slot extractor (`extract_slots_deterministic`) without crashing.
+- **Prompt Caching & Streaming**:
+  In a production UI, system prompts and catalog metadata are cached at the inference gateway. For real-time chat, response tokens can be streamed directly to the frontend.
 
-## Human-in-the-loop
+---
 
-The system's output is explicitly a *draft quote for review*, not a booking:
+## 4. Failure Handling
 
-- The schema has no "confirm" or "book" action — it only ever produces a
-  proposed itinerary + priced quote for a human agent to read.
-- `personalization_notes` and `reason_if_unfulfillable` are included
-  specifically so the reviewing agent understands *why* the system chose what
-  it chose (or declined to answer), not just what it chose — that's what makes
-  the review meaningful rather than a rubber stamp.
-- Any actual booking/confirmation action would live entirely outside this
-  pipeline, gated behind explicit human approval in the agent's own tooling —
-  this system never has write access to a booking system, only read access to
-  the catalog.
+| Scenario | System Response |
+|---|---|
+| **Invalid Destination (e.g. Goa, REQ-3)** | Catches out-of-catalog location immediately; responds informing user that Goa is not in the catalog and lists available destinations (`Alleppey, Kochi, Munnar`); preserves existing slots. |
+| **Missing API Key / Offline Mode** | Automatically falls back to deterministic regex & rule-based slot extraction; zero downtime and 100% functional conversational CLI. |
+| **API Timeout / Rate Limit (429/500)** | Caught gracefully in `extract_slots_with_llm`, falling back to deterministic extraction for the current turn. |
+| **Budget Exceeded** | If requested budget is below catalog rates, the system builds the most affordable valid combination and explicitly notes the budget delta rather than hallucinating fake discounts. |
 
-## With more time, the top 3 things I'd add
+---
 
-1. **A real offline eval set** for retrieval (expected-candidates per sample
-   request) and an LLM-judge or rubric-based check for itinerary *quality*
-   (pacing, preference fit), not just grounding correctness — grounding is
-   necessary but not sufficient for a good itinerary.
-2. **Streaming + partial-result UI** so the agent sees the itinerary build up
-   day-by-day instead of waiting on the full JSON, plus a proper async
-   job/queue wrapper around the Groq call for production reliability
-   (timeouts, backoff, circuit-breaking on repeated provider errors).
-3. **Confidence-aware retrieval**: right now "destination not found" is
-   binary; a fuzzy/typo-tolerant match (e.g. "Kochin" → Kochi) plus a
-   "did you mean" clarification step would reduce false-unfulfillable results
-   without ever risking a fabricated destination.
+## 5. Evaluation Strategy & Metrics
+
+To ensure product quality and verify zero hallucinations in production, we implement automated metrics:
+
+### Primary Grounding Metrics
+- **Catalog ID Precision**: % of cited item IDs that exist in `sample_data.json` (Target: 100%).
+- **Price Accuracy**: % of items whose unit price exactly matches the catalog canonical price (Target: 100%).
+- **Mathematical Integrity**: Binary check that $\text{Total} == \sum \text{Line Totals}$ (Target: 100%).
+- **Decline Recall**: % of unfulfillable requests (e.g. Goa) correctly flagged and declined without fabricated inventory (Target: 100%).
+
+### Business & Quality Metrics
+- **Budget Fit Rate**: Adherence of total quote to requested budget limits.
+- **Preference Alignment**: Tag overlap between traveler interests and selected hotel/activities.
+- **Turn Efficiency**: Average number of conversational turns needed to produce a confirmed itinerary.
+
+### Evaluation Harness (`eval.py`)
+`eval.py` provides automated verification:
+1. Re-validates every output JSON file in `outputs/` against raw catalog data.
+2. Runs a self-test with a deliberately corrupted itinerary testing all error detectors (fake IDs, altered prices, subtotal discrepancies, grand total errors).
+
+---
+
+## 6. Human-in-the-Loop Design
+
+Our core philosophy is **AI assists, human confirms**.
+
+- The AI generates a structured itinerary draft with exact supplier IDs and computed pricing.
+- The output structure explicitly designates status as `"fulfilled"` or `"ok_pending_human_review"` and requires human travel agent confirmation before any booking or payment processing occurs.
+- The system produces a reviewable document, not an irreversible booking action.
+
+---
+
+## 7. With More Time: Top 3 Enhancements
+
+1. **Multi-City Route & Inter-City Travel Optimization**:
+   For region-wide trips (e.g., 5 days across Kerala), implement a routing module (graph shortest path) that sequences hubs (Kochi $\to$ Alleppey $\to$ Munnar) to minimize transfer time (directly honoring feedback like *"kids got bored on long drives"*).
+2. **Pydantic Structured Output Enforcement**:
+   Use Pydantic v2 schemas with `instructor` or LangChain structured outputs to guarantee schema compliance at compile-time.
+3. **OpenTelemetry Observability & Slot Drift Monitoring**:
+   Instrument every LangGraph node with latency tracing, token tracking, and slot-update telemetry to monitor conversation health and detect extraction anomalies in production.

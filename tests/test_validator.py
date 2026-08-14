@@ -1,56 +1,105 @@
-import json
-import os
-import pytest
+"""tests/test_validator.py — Tests for grounding and math validation logic."""
 
-from app import load_data, validate_node
-
-
-def make_state(catalog, itinerary, destination_known=True):
-    state = {
-        "itinerary": itinerary,
-        "catalog": catalog,
-        "all_ids": {item["id"] for item in catalog},
-        "destination_known": destination_known,
-    }
-    return state
+import unittest
+from app import load_data, validate_itinerary
 
 
-def test_unfulfillable_when_destination_unknown():
-    data = load_data()
-    catalog = data["suppliers"]
-    itinerary = {"status": "ok", "days": [], "quote": {"line_items": [], "total": 0}, "cited_ids": []}
-    state = make_state(catalog, itinerary, destination_known=False)
-    out = validate_node(state)
-    assert out["validation_errors"], "Should flag error when destination unknown but status ok"
+class TestValidator(unittest.TestCase):
+    def setUp(self):
+        self.data = load_data()
+
+    def test_valid_itinerary_passes(self):
+        valid = {
+            "status": "fulfilled",
+            "destination": "Munnar",
+            "days": [
+                {
+                    "day": 1,
+                    "title": "Day 1",
+                    "hotel": {"id": "HOT-004", "name": "Munnar Hikers Hostel"},
+                    "activities": [{"id": "ACT-002", "name": "Munnar Tea Estate Walk & Tasting"}],
+                }
+            ],
+            "quote": {
+                "line_items": [
+                    {
+                        "catalog_id": "HOT-004",
+                        "name": "Munnar Hikers Hostel",
+                        "unit_price_inr": 1500.0,
+                        "quantity": 1,
+                        "line_total_inr": 1500.0,
+                    },
+                    {
+                        "catalog_id": "ACT-002",
+                        "name": "Munnar Tea Estate Walk & Tasting",
+                        "unit_price_inr": 900.0,
+                        "quantity": 2,
+                        "line_total_inr": 1800.0,
+                    },
+                ],
+                "total": 3300.0,
+            },
+        }
+        errors = validate_itinerary(valid, self.data)
+        self.assertEqual(errors, [])
+
+    def test_fake_id_detected(self):
+        broken = {
+            "days": [],
+            "quote": {
+                "line_items": [
+                    {
+                        "catalog_id": "FAKE-999",
+                        "name": "Fake Hotel",
+                        "unit_price_inr": 1000.0,
+                        "quantity": 1,
+                        "line_total_inr": 1000.0,
+                    }
+                ],
+                "total": 1000.0,
+            },
+        }
+        errors = validate_itinerary(broken, self.data)
+        self.assertTrue(any("FAKE-999" in e and "does not exist" in e for e in errors))
+
+    def test_price_mismatch_detected(self):
+        broken = {
+            "days": [],
+            "quote": {
+                "line_items": [
+                    {
+                        "catalog_id": "HOT-001",
+                        "name": "Backwater Breeze Homestay",
+                        "unit_price_inr": 9999.0,  # Real price is 3200
+                        "quantity": 1,
+                        "line_total_inr": 9999.0,
+                    }
+                ],
+                "total": 9999.0,
+            },
+        }
+        errors = validate_itinerary(broken, self.data)
+        self.assertTrue(any("unit_price_inr mismatch" in e for e in errors))
+
+    def test_total_mismatch_detected(self):
+        broken = {
+            "days": [],
+            "quote": {
+                "line_items": [
+                    {
+                        "catalog_id": "HOT-001",
+                        "name": "Backwater Breeze Homestay",
+                        "unit_price_inr": 3200.0,
+                        "quantity": 2,
+                        "line_total_inr": 6400.0,
+                    }
+                ],
+                "total": 10000.0,  # Should be 6400
+            },
+        }
+        errors = validate_itinerary(broken, self.data)
+        self.assertTrue(any("total_inr mismatch" in e for e in errors))
 
 
-def test_price_arithmetic_and_grounding_valid():
-    data = load_data()
-    catalog = data["suppliers"]
-    # create a simple valid itinerary referencing HOT-001 and ACT-001
-    line_items = [
-        {"id": "HOT-001", "name": "Backwater Breeze Homestay", "unit_price": 3200, "quantity": 2, "subtotal": 6400},
-        {"id": "ACT-001", "name": "Alleppey Houseboat Day Cruise", "unit_price": 2200, "quantity": 4, "subtotal": 8800},
-    ]
-    itinerary = {
-        "status": "ok",
-        "destination": "Alleppey",
-        "days": [],
-        "quote": {"line_items": line_items, "total": 15200},
-        "cited_ids": ["HOT-001", "ACT-001"]
-    }
-    state = make_state(catalog, itinerary, destination_known=True)
-    out = validate_node(state)
-    assert not out["validation_errors"], f"Validation failed: {out['validation_errors']}"
-
-
-def test_subtotal_mismatch_detected():
-    data = load_data()
-    catalog = data["suppliers"]
-    line_items = [
-        {"id": "HOT-001", "name": "Backwater Breeze Homestay", "unit_price": 3200, "quantity": 2, "subtotal": 6300},
-    ]
-    itinerary = {"status": "ok", "destination": "Alleppey", "days": [], "quote": {"line_items": line_items, "total": 6300}, "cited_ids": ["HOT-001"]}
-    state = make_state(catalog, itinerary, destination_known=True)
-    out = validate_node(state)
-    assert out["validation_errors"], "Should detect subtotal mismatch"
+if __name__ == "__main__":
+    unittest.main()

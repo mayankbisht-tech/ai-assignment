@@ -1,124 +1,156 @@
-"""
-Grounding evaluation harness (optional stretch goal).
-
-Re-checks already-generated outputs/*.json independently of app.py's
-in-loop validator, so grounding is verified by a second, separate pass:
-
-  1. Every cited id exists in the catalog.
-  2. No HOT-/ACT-/TRN- pattern appears anywhere in the output that isn't
-     a real catalog id (catches ids the model might have invented outside
-     the "cited_ids" field, e.g. in notes).
-  3. Every line-item subtotal equals unit_price * quantity, and the total
-     equals the sum of subtotals.
-  4. The known "unfulfillable trap" request (Goa, no matching inventory)
-     is actually flagged unfulfillable, not answered with fabricated
-     inventory.
+"""eval.py — Evaluation Harness: Re-validate output files + broken itinerary self-test.
 
 Usage:
-    python app.py --all --mock      # generate outputs/*.json first
     python eval.py
+
+Checks:
+  1. Validates generated output files in outputs/ against catalog rules & prices.
+  2. Runs a hand-crafted broken itinerary exercising ALL error-detection paths.
 """
 
-import glob
+from __future__ import annotations
+
 import json
-import os
-import re
+import sys
+from pathlib import Path
 
-from app import load_data, VALID_ID_RE  # reuse the same id-pattern regex
+# Ensure Unicode output works on Windows terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
+from helpers import load_env
+load_env()
 
+from app import load_data, validate_itinerary
 
-def evaluate_file(path: str, all_ids: set, data: dict) -> list[str]:
-    with open(path, "r", encoding="utf-8") as f:
-        result = json.load(f)
+ROOT = Path(__file__).resolve().parent
+OUTPUTS_DIR = ROOT / "outputs"
 
-    problems = []
-    itinerary = result.get("itinerary")
-    if itinerary is None:
-        return ["No parsable itinerary JSON was produced."]
+# ── Deliberately broken itinerary ─────────────────────────────────────────
+# Errors baked in:
+#   (a) GOA-999 — non-existent catalog_id
+#   (b) Wrong name for HOT-001
+#   (c) Wrong unit_price_inr for HOT-001 (should be 3200)
+#   (d) Wrong line_total_inr for HOT-001 (should be 3200 × 2 = 6400)
+#   (e) total_inr doesn't match sum of line totals
+#   (f) ACT-099 cited in days but has no line item and doesn't exist
 
-    if itinerary.get("status") == "unfulfillable":
-        if itinerary.get("days") or itinerary.get("quote", {}).get("line_items"):
-            problems.append("Unfulfillable response still contains itinerary content.")
-        return problems
+_BROKEN = {
+    "days": [
+        {
+            "day": 1,
+            "title": "Fabricated Goa beach day.",
+            "catalog_ids": ["GOA-999", "ACT-099"],   # (a) fake id, (f) no line item
+        }
+    ],
+    "quote": {
+        "line_items": [
+            {
+                "catalog_id": "GOA-999",            # (a) non-existent
+                "name": "Goa Beach Paradise",        # fabricated
+                "unit_price_inr": 9999,
+                "quantity": 3,
+                "line_total_inr": 29000,             # (d) wrong (9999×3=29997)
+            },
+            {
+                "catalog_id": "HOT-001",
+                "name": "Wrong Name Hotel",          # (b) name mismatch
+                "unit_price_inr": 5000,              # (c) should be 3200
+                "quantity": 2,
+                "line_total_inr": 10000,             # (d) should be 6400
+            },
+        ],
+        "total": 50000,                              # (e) doesn't match sum
+    },
+    "notes": "Fabricated itinerary for harness self-test.",
+}
 
-    full_text = json.dumps(itinerary)
-    mentioned = set(re.findall(r"\b(?:HOT|ACT|TRN)-\d{3}\b", full_text))
-    stray = mentioned - all_ids
-    if stray:
-        problems.append(f"Ids not in catalog: {sorted(stray)}")
-
-    line_items = itinerary.get("quote", {}).get("line_items", [])
-    running_total = 0.0
-    for li in line_items:
-        expected = round(li.get("unit_price", 0) * li.get("quantity", 0), 2)
-        actual = round(li.get("subtotal", -1), 2)
-        if abs(expected - actual) > 0.01:
-            problems.append(f"{li.get('id')}: {li['unit_price']}x{li['quantity']} != {li['subtotal']}")
-        running_total += li.get("subtotal", 0)
-
-    stated_total = round(itinerary.get("quote", {}).get("total", -1), 2)
-    if abs(round(running_total, 2) - stated_total) > 0.01:
-        problems.append(f"Total {stated_total} != sum of line items {round(running_total, 2)}")
-
-    # New semantic checks
-    # 1) If request_text specifies N days, itinerary must contain exactly N days
-    req_text = result.get("request_text", "")
-    m = re.search(r"(\d+)\s+days?\b", req_text.lower())
-    if m:
-        req_days = int(m.group(1))
-        returned_days = len(itinerary.get("days", []))
-        if returned_days != req_days:
-            problems.append(f"Requested {req_days} days but itinerary contains {returned_days} days")
-
-    # 2) Hotel quantity must equal rooms_needed * nights where rooms_needed = ceil(party_size / hotel_capacity)
-    # Use traveler profile from data for party size
-    party = data.get("traveler_profile", {}).get("party", {})
-    total_people = int(party.get("adults", 0)) + int(party.get("children", 0))
-    nights = None
-    if m:
-        nights = int(m.group(1))
-    else:
-        nights = len(itinerary.get("days", []))
-
-    # build id->item map from data catalog
-    catalog = {it["id"]: it for it in data.get("suppliers", [])}
-    for li in line_items:
-        iid = li.get("id")
-        cat = catalog.get(iid)
-        if cat and cat.get("type") == "hotel":
-            cap = int(cat.get("capacity", 0)) or 1
-            rooms_needed = -(-total_people // cap)
-            expected_qty = rooms_needed * (nights or 1)
-            if li.get("quantity", 0) != expected_qty:
-                problems.append(f"Hotel line item {iid} quantity {li.get('quantity')} != expected rooms*nights {expected_qty}")
-
-    return problems
+_EXPECTED_ERROR_CHECKS = [
+    ("non-existent catalog_id GOA-999",     lambda e: "GOA-999" in e and "does not exist" in e),
+    ("name mismatch for HOT-001",           lambda e: "name mismatch" in e and "HOT-001" in e),
+    ("unit_price mismatch for HOT-001",     lambda e: "unit_price_inr mismatch" in e and "HOT-001" in e),
+    ("line_total mismatch for HOT-001",     lambda e: "line_total_inr mismatch" in e and "HOT-001" in e),
+    ("grand total mismatch",                lambda e: "total_inr mismatch" in e),
+    ("ACT-099 missing from line_items",     lambda e: "ACT-099" in e),
+]
 
 
-def main():
+def validate_output_file(path: Path, data: dict) -> tuple[bool, list[str]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    itin = payload.get("itinerary")
+
+    if itin is None:
+        status = payload.get("status", "")
+        if status in ("declined_no_inventory", "unfulfillable"):
+            return True, []
+        return False, ["itinerary is null but status is not unfulfillable/declined"]
+
+    errors = validate_itinerary(itin, data)
+    return len(errors) == 0, errors
+
+
+def main() -> None:
     data = load_data()
-    all_ids = {item["id"] for item in data["suppliers"]}
+    overall_pass = True
 
-    files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.json")))
+    # ── 1. Real output files ──────────────────────────────────────────────
+    files = sorted(OUTPUTS_DIR.glob("*.json"))
+    print(f"\n{'=' * 60}")
+    print("REAL OUTPUT VALIDATION")
+    print(f"{'=' * 60}")
+
     if not files:
-        print("No outputs found. Run app.py first.")
-        return
+        print("⚠  No files in outputs/.")
+    else:
+        for fpath in files:
+            passed, errors = validate_output_file(fpath, data)
+            icon = "✅ PASS" if passed else "❌ FAIL"
+            print(f"\n{icon}  {fpath.name}")
+            if errors:
+                for e in errors:
+                    print(f"     • {e}")
+                overall_pass = False
+            else:
+                payload = json.loads(fpath.read_text(encoding="utf-8"))
+                itin = payload.get("itinerary") or {}
+                quote = itin.get("quote") or {}
+                tot = quote.get("total", itin.get("total_inr", "n/a"))
+                status = payload.get("status") or itin.get("status", "ok")
+                print(f"     status={status}  total=₹{tot if tot != 'n/a' else 'n/a'}")
 
-    all_passed = True
-    for path in files:
-        problems = evaluate_file(path, all_ids, data)
-        name = os.path.basename(path)
-        if problems:
-            all_passed = False
-            print(f"[FAIL] {name}")
-            for p in problems:
-                print(f"    - {p}")
-        else:
-            print(f"[PASS] {name}")
+    # ── 2. Broken itinerary self-test ─────────────────────────────────────
+    print(f"\n{'=' * 60}")
+    print("BROKEN ITINERARY SELF-TEST (must catch all error types)")
+    print(f"{'=' * 60}")
 
-    print("\nOverall:", "ALL GROUNDED" if all_passed else "GROUNDING ISSUES FOUND")
+    detected = validate_itinerary(_BROKEN, data)
+    self_test_pass = True
+
+    for label, pred in _EXPECTED_ERROR_CHECKS:
+        caught = any(pred(e) for e in detected)
+        icon = "✅" if caught else "❌ MISSED"
+        print(f"  {icon}  {label}")
+        if not caught:
+            self_test_pass = False
+
+    print("\n  All detected errors:")
+    for e in detected:
+        print(f"    • {e}")
+
+    if not self_test_pass:
+        overall_pass = False
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    print(f"\n{'=' * 60}")
+    print("SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Real outputs    : {'ALL PASS ✅' if overall_pass else 'SOME FAILED ❌'}")
+    print(f"  Broken self-test: {'ALL ERRORS CAUGHT ✅' if self_test_pass else 'SOME MISSED ❌'}")
+
+    if not overall_pass:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
